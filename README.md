@@ -65,6 +65,7 @@ When the session expires, the script displays **Visit ItemDB** instead of a pric
 ## Caching and API use
 
 - Prices are cached in the browser for **6 hours**.
+- To force fresh prices, click the **Tampermonkey toolbar icon**, open this script's menu, and choose **Refresh ItemDB price cache**. The current page will immediately request fresh ItemDB data without submitting or changing anything on Neopets.
 - Missing-item results are cached for **1 hour**.
 - Item names are requested in batches of up to **100**.
 - The script uses ItemDB's recommended `POST /api/v1/items/many` endpoint.
@@ -95,7 +96,7 @@ If the repository was already cloned, omit `git init`, `git branch`, and `git re
 
 ## Initial test checklist
 
-After installing version `0.1.0`:
+After installing version `0.1.1`:
 
 1. Visit ItemDB and then reload Quick Stock.
 2. Confirm Eo Codestone displays the current ItemDB price.
@@ -115,6 +116,10 @@ Visit `https://itemdb.com.br/`, then reload the Neopets page.
 ### Prices say "Unavailable"
 
 Check Tampermonkey's site access and confirm the script has permission to connect to `itemdb.com.br`.
+
+### Quick Stock shows a horizontal scrollbar
+
+Version `0.1.1` uses a fixed desktop table layout so the added price column fits without horizontal overflow. Item names may wrap onto a second line when needed. The original mobile table behavior is preserved.
 
 ### The column is missing after a Neopets update
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1 - 2026-07-11
+
+- Remove the slight desktop horizontal scrollbar from Quick Stock.
+- Let Quick Stock item names and ItemDB prices wrap within a fixed-width table.
+- Preserve Neopets' existing mobile table behavior.
+- Add a Tampermonkey menu command to clear the six-hour cache and fetch fresh ItemDB prices immediately.
+
 ## 0.1.0 - 2026-07-11
 
 - Initial display-only release.

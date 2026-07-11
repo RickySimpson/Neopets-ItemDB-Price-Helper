@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Neopets ItemDB Price Helper
 // @namespace    https://github.com/RickySimpson/np
-// @version      0.1.0
+// @version      0.1.1
 // @description  Displays ItemDB prices on Neopets Quick Stock and Shop Stock. Display only; never selects, prices, submits, buys, sells, donates, or moves items.
 // @author       RickySimpson
 // @homepageURL  https://github.com/RickySimpson/np
@@ -13,6 +13,7 @@
 // @connect      itemdb.com.br
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
+// @grant        GM_registerMenuCommand
 // @grant        unsafeWindow
 // @run-at       document-start
 // @noframes
@@ -47,6 +48,7 @@
     };
 
     addStyles();
+    registerMenuCommands();
 
     if (isQuickStockPage) {
         installQuickStockFetchObserver();
@@ -135,6 +137,47 @@
                 cursor: help;
             }
 
+            /*
+             * Neopets gives the first Quick Stock column a 410px minimum width
+             * on desktop. Adding another fixed-width column can therefore create
+             * a small horizontal scrollbar. Keep the table at 100% width and let
+             * the item-name and ItemDB columns wrap instead.
+             *
+             * This is desktop-only so the site's existing mobile horizontal-table
+             * behavior remains unchanged.
+             */
+            @media (min-width: 1024px) {
+                #quickstock-table-container {
+                    overflow-x: hidden !important;
+                }
+
+                .quickstock-table.np-table {
+                    width: 100% !important;
+                    table-layout: fixed;
+                }
+
+                .quickstock-table.np-table thead th:first-child,
+                .quickstock-table.np-table tbody td:first-child {
+                    width: 26% !important;
+                    min-width: 0 !important;
+                    overflow-wrap: anywhere;
+                }
+
+                .quickstock-table.np-table .np-idb-price-header,
+                .quickstock-table.np-table .np-idb-price-cell {
+                    width: 10% !important;
+                    min-width: 0;
+                    padding-left: 4px !important;
+                    padding-right: 4px !important;
+                    white-space: normal;
+                }
+
+                .quickstock-table.np-table thead th:nth-child(n + 3),
+                .quickstock-table.np-table tbody td:nth-child(n + 3) {
+                    width: 8% !important;
+                }
+            }
+
             @media (max-width: 768px) {
                 .market-your-table .np-idb-price-cell {
                     white-space: normal;
@@ -146,6 +189,39 @@
                 }
             }
         `);
+    }
+
+    function registerMenuCommands() {
+        if (typeof GM_registerMenuCommand !== 'function') return;
+
+        GM_registerMenuCommand('Refresh ItemDB price cache', () => {
+            refreshPriceCache();
+        });
+    }
+
+    function refreshPriceCache() {
+        try {
+            window.localStorage.removeItem(CACHE_KEY);
+        } catch (error) {
+            console.warn(SCRIPT_PREFIX, 'Could not clear the local price cache.', error);
+        }
+
+        state.pricesByName.clear();
+        state.apiStatus = 'idle';
+        scheduleRender();
+
+        const names = isQuickStockPage
+            ? Array.from(state.quickStockItemsByName.values())
+                .filter((item) => !item.isCash)
+                .map((item) => item.name)
+            : Array.from(state.shopRowsByIndex.values()).map((row) => row.name);
+
+        if (names.length > 0) {
+            console.info(SCRIPT_PREFIX, 'Price cache cleared; requesting fresh ItemDB prices.');
+            void loadPrices(names);
+        } else {
+            console.info(SCRIPT_PREFIX, 'Price cache cleared. Prices will refresh when the page items finish loading.');
+        }
     }
 
     function onDomReady(callback) {
