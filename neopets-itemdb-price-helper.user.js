@@ -1,27 +1,31 @@
 // ==UserScript==
 // @name         Neopets ItemDB Price Helper
 // @namespace    https://github.com/RickySimpson/np
-// @version      0.1.2
+// @version      0.1.3
 // @description  Displays ItemDB prices on Neopets Quick Stock and Shop Stock. Display only; never selects, prices, submits, buys, sells, donates, or moves items.
 // @author       RickySimpson
 // @homepageURL  https://github.com/RickySimpson/np
 // @supportURL   https://github.com/RickySimpson/np/issues
 // @updateURL    https://raw.githubusercontent.com/RickySimpson/np/main/neopets-itemdb-price-helper.user.js
 // @downloadURL  https://raw.githubusercontent.com/RickySimpson/np/main/neopets-itemdb-price-helper.user.js
+// @match        *://neopets.com/quickstock.phtml*
+// @match        *://www.neopets.com/quickstock.phtml*
 // @match        *://*.neopets.com/quickstock.phtml*
+// @match        *://neopets.com/market.phtml*
+// @match        *://www.neopets.com/market.phtml*
 // @match        *://*.neopets.com/market.phtml*
 // @connect      itemdb.com.br
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
 // @grant        GM_registerMenuCommand
-// @grant        unsafeWindow
-// @run-at       document-start
+// @run-at       document-idle
 // @noframes
 // ==/UserScript==
 
 (() => {
     'use strict';
 
+    const VERSION = '0.1.3';
     const SCRIPT_PREFIX = '[NP ItemDB Price Helper]';
     const ITEMDB_API_URL = 'https://itemdb.com.br/api/v1/items/many';
     const ITEMDB_HOME_URL = 'https://itemdb.com.br/';
@@ -30,7 +34,6 @@
     const MISSING_CACHE_TTL_MS = 60 * 60 * 1000;
     const MAX_CACHE_ENTRIES = 750;
     const API_CHUNK_SIZE = 100;
-    const QUICKSTOCK_EVENT = 'np-itemdb-helper:quickstock-items';
 
     const path = window.location.pathname.toLowerCase();
     const pageType = new URLSearchParams(window.location.search).get('type');
@@ -40,35 +43,30 @@
     if (!isQuickStockPage && !isShopStockPage) return;
 
     const state = {
-        apiStatus: 'idle', // idle | loading | ready | auth | rate-limit | error
+        apiStatus: 'idle',
         pricesByName: new Map(),
-        quickStockItemsByName: new Map(),
-        shopRowsByIndex: new Map(),
+        requestedNames: new Set(),
+        requestInProgress: false,
         renderQueued: false,
+        lastTableFound: false,
+        lastVisibleItemCount: 0,
+        lastError: '',
     };
+
+    let pageObserver = null;
 
     addStyles();
     registerMenuCommands();
+    startPageObserver();
+    scheduleRender();
 
-    if (isQuickStockPage) {
-        installQuickStockFetchObserver();
-        document.addEventListener(QUICKSTOCK_EVENT, handleQuickStockPayload);
-    }
-
-    onDomReady(() => {
-        observePageChanges();
-
-        if (isShopStockPage) {
-            initializeShopStock();
-        }
-
-        scheduleRender();
-    });
+    console.info(SCRIPT_PREFIX, `Version ${VERSION} started on ${window.location.href}`);
 
     function addStyles() {
         GM_addStyle(`
             .np-idb-price-header,
             .np-idb-price-cell {
+                box-sizing: border-box;
                 text-align: center !important;
                 vertical-align: middle !important;
                 min-width: 118px;
@@ -102,13 +100,15 @@
                 text-decoration-style: solid;
             }
 
-            .np-idb-price-main {
+            .np-idb-price-main,
+            .np-idb-price-detail,
+            .np-idb-price-label,
+            .np-idb-price-muted {
                 display: block;
             }
 
             .np-idb-price-detail,
             .np-idb-price-label {
-                display: block;
                 margin-top: 3px;
                 font-size: 10px;
                 line-height: 1.2;
@@ -137,15 +137,6 @@
                 cursor: help;
             }
 
-            /*
-             * Neopets gives the first Quick Stock column a 410px minimum width
-             * on desktop. Adding another fixed-width column can therefore create
-             * a small horizontal scrollbar. Keep the table at 100% width and let
-             * the item-name and ItemDB columns wrap instead.
-             *
-             * This is desktop-only so the site's existing mobile horizontal-table
-             * behavior remains unchanged.
-             */
             @media (min-width: 1024px) {
                 #quickstock-table-container {
                     overflow-x: hidden !important;
@@ -195,46 +186,50 @@
         if (typeof GM_registerMenuCommand !== 'function') return;
 
         GM_registerMenuCommand('Refresh ItemDB price cache', () => {
-            refreshPriceCache();
+            try {
+                window.localStorage.removeItem(CACHE_KEY);
+            } catch (error) {
+                console.warn(SCRIPT_PREFIX, 'Could not clear the local cache.', error);
+            }
+
+            state.pricesByName.clear();
+            state.requestedNames.clear();
+            state.apiStatus = 'idle';
+            state.lastError = '';
+            scheduleRender();
+        });
+
+        GM_registerMenuCommand('Show helper status', () => {
+            const page = isQuickStockPage ? 'Quick Stock' : 'Shop Stock';
+            const message = [
+                `Neopets ItemDB Price Helper v${VERSION}`,
+                `Page: ${page}`,
+                `Table found: ${state.lastTableFound ? 'Yes' : 'No'}`,
+                `Visible items found: ${state.lastVisibleItemCount}`,
+                `ItemDB status: ${state.apiStatus}`,
+                state.lastError ? `Last error: ${state.lastError}` : '',
+            ].filter(Boolean).join('\n');
+
+            window.alert(message);
         });
     }
 
-    function refreshPriceCache() {
-        try {
-            window.localStorage.removeItem(CACHE_KEY);
-        } catch (error) {
-            console.warn(SCRIPT_PREFIX, 'Could not clear the local price cache.', error);
+    function startPageObserver() {
+        if (!pageObserver) {
+            pageObserver = new MutationObserver((mutations) => {
+                const hasRelevantChange = mutations.some((mutation) => {
+                    const target = mutation.target instanceof Element
+                        ? mutation.target
+                        : mutation.target.parentElement;
+
+                    return !target?.closest?.('.np-idb-price-cell, .np-idb-price-header');
+                });
+
+                if (hasRelevantChange) scheduleRender();
+            });
         }
 
-        state.pricesByName.clear();
-        state.apiStatus = 'idle';
-        scheduleRender();
-
-        const names = isQuickStockPage
-            ? Array.from(state.quickStockItemsByName.values())
-                .filter((item) => !item.isCash)
-                .map((item) => item.name)
-            : Array.from(state.shopRowsByIndex.values()).map((row) => row.name);
-
-        if (names.length > 0) {
-            console.info(SCRIPT_PREFIX, 'Price cache cleared; requesting fresh ItemDB prices.');
-            void loadPrices(names);
-        } else {
-            console.info(SCRIPT_PREFIX, 'Price cache cleared. Prices will refresh when the page items finish loading.');
-        }
-    }
-
-    function onDomReady(callback) {
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', callback, { once: true });
-        } else {
-            callback();
-        }
-    }
-
-    function observePageChanges() {
-        const observer = new MutationObserver(() => scheduleRender());
-        observer.observe(document.documentElement, {
+        pageObserver.observe(document.documentElement, {
             childList: true,
             subtree: true,
         });
@@ -246,249 +241,175 @@
 
         window.requestAnimationFrame(() => {
             state.renderQueued = false;
-            if (isQuickStockPage) renderQuickStock();
-            if (isShopStockPage) renderShopStock();
+            pageObserver?.disconnect();
+
+            try {
+                const names = isQuickStockPage
+                    ? renderQuickStockFromDom()
+                    : renderShopStockFromDom();
+
+                state.lastVisibleItemCount = names.length;
+                void loadPrices(names);
+            } finally {
+                startPageObserver();
+            }
         });
     }
 
-    // ---------------------------------------------------------------------
-    // Quick Stock: passively observe Neopets' existing AJAX response.
-    // The response returned to Neopets is never modified or delayed.
-    // ---------------------------------------------------------------------
-
-    function installQuickStockFetchObserver() {
-        const targetWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-        if (targetWindow.__npItemdbPriceHelperFetchPatched) return;
-        if (typeof targetWindow.fetch !== 'function') return;
-
-        targetWindow.__npItemdbPriceHelperFetchPatched = true;
-        const originalFetch = targetWindow.fetch;
-
-        targetWindow.fetch = async function patchedFetch(...args) {
-            const response = await originalFetch.apply(this, args);
-
-            try {
-                const requestTarget = args[0];
-                const requestUrl = typeof requestTarget === 'string'
-                    ? requestTarget
-                    : requestTarget && requestTarget.url;
-                const url = new URL(requestUrl, window.location.href);
-
-                if (url.pathname.endsWith('/np-templates/ajax/quickstock/get_items.php')) {
-                    response.clone().json().then((payload) => {
-                        document.dispatchEvent(new CustomEvent(QUICKSTOCK_EVENT, {
-                            detail: JSON.stringify(payload),
-                        }));
-                    }).catch((error) => {
-                        console.warn(SCRIPT_PREFIX, 'Could not read the Quick Stock response.', error);
-                    });
-                }
-            } catch (error) {
-                console.warn(SCRIPT_PREFIX, 'Quick Stock response observer failed safely.', error);
-            }
-
-            return response;
-        };
-    }
-
-    function handleQuickStockPayload(event) {
-        let payload;
-        try {
-            payload = JSON.parse(event.detail);
-        } catch {
-            return;
-        }
-
-        if (!payload || payload.success !== true || !Array.isArray(payload.items)) return;
-
-        state.quickStockItemsByName.clear();
-        const namesToLoad = [];
-
-        for (const item of payload.items) {
-            if (!item || typeof item.name !== 'string') continue;
-            const cleanName = decodeHtml(item.name).trim();
-            state.quickStockItemsByName.set(normalizeName(cleanName), {
-                ...item,
-                name: cleanName,
-            });
-
-            if (!item.isCash) namesToLoad.push(cleanName);
-        }
-
-        scheduleRender();
-        void loadPrices(namesToLoad);
-    }
-
-    function renderQuickStock() {
-        const table = document.querySelector('#quickstock-table-container table.quickstock-table');
-        if (!table) return;
+    function renderQuickStockFromDom() {
+        const table = document.querySelector(
+            '#quickstock-table-container table.quickstock-table, #quickstock-table-container table'
+        );
+        state.lastTableFound = Boolean(table);
+        if (!table) return [];
 
         insertHeaderAfterFirstColumn(table.querySelector('thead tr'));
-
-        // Neopets creates a detached sticky-header clone. Keep its column count
-        // identical so the site's own width-sync code continues to work.
-        document.querySelectorAll('.quickstock-thead-clone table.quickstock-table thead tr')
+        document.querySelectorAll('.quickstock-thead-clone table thead tr')
             .forEach(insertHeaderAfterFirstColumn);
 
+        const names = [];
         const rows = table.querySelectorAll('tbody tr');
+
         for (const row of rows) {
             const nameCell = row.cells && row.cells[0];
             if (!nameCell) continue;
 
             const priceCell = ensureCellAfter(nameCell);
-            const visibleText = nameCell.textContent.trim();
-
-            if (/^check all$/i.test(visibleText)) {
-                renderMuted(priceCell, '—');
-                continue;
-            }
-
             const name = extractQuickStockItemName(nameCell);
-            if (!name) {
-                priceCell.replaceChildren();
+
+            if (!name || /^check all$/i.test(name)) {
+                renderMuted(priceCell, name ? '—' : '');
                 continue;
             }
 
-            const inventoryItem = state.quickStockItemsByName.get(normalizeName(name));
-            const isCash = Boolean(inventoryItem && inventoryItem.isCash)
-                || Boolean(row.querySelector('.qs-cash-marker'));
-
+            const isCash = Boolean(row.querySelector('.qs-cash-marker'));
             if (isCash) {
                 renderMuted(priceCell, 'NC item');
                 continue;
             }
 
-            const quantity = Number(inventoryItem && inventoryItem.count) || extractQuantity(nameCell) || 1;
+            const quantity = extractQuantity(nameCell);
+            names.push(name);
             renderPriceCell(priceCell, name, quantity, false);
         }
+
+        return uniqueNames(names);
     }
 
-    function insertHeaderAfterFirstColumn(headerRow) {
-        if (!headerRow || headerRow.querySelector('.np-idb-price-header')) return;
-        const firstHeader = headerRow.cells && headerRow.cells[0];
-        if (!firstHeader) return;
-
-        const header = document.createElement('th');
-        header.className = 'np-idb-price-header';
-        header.innerHTML = 'ItemDB Price<small>display only</small>';
-        firstHeader.insertAdjacentElement('afterend', header);
-    }
-
-    function extractQuickStockItemName(cell) {
-        const clone = cell.cloneNode(true);
-        clone.querySelectorAll('.qs-count-badge, .qs-cash-marker').forEach((node) => node.remove());
-        return decodeHtml(clone.textContent).trim();
-    }
-
-    function extractQuantity(cell) {
-        const badge = cell.querySelector('.qs-count-badge');
-        const match = badge && badge.textContent.match(/(\d[\d,]*)/);
-        return match ? Number(match[1].replace(/,/g, '')) : 1;
-    }
-
-    // ---------------------------------------------------------------------
-    // Shop Stock: read the page's existing row configuration and add a
-    // separate display-only column immediately before "Your Price".
-    // ---------------------------------------------------------------------
-
-    async function initializeShopStock() {
-        const config = await waitFor(() => {
-            const targetWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-            return targetWindow.__marketYourConfig;
-        }, 10000);
-
-        if (!config || !Array.isArray(config.rows)) {
-            console.warn(SCRIPT_PREFIX, 'Shop Stock configuration was not found.');
-            return;
-        }
-
-        state.shopRowsByIndex.clear();
-        const namesToLoad = [];
-
-        for (const row of config.rows) {
-            if (!row || typeof row.name !== 'string') continue;
-            const cleanName = decodeHtml(row.name).trim();
-            state.shopRowsByIndex.set(String(row.idx), {
-                ...row,
-                name: cleanName,
-            });
-            namesToLoad.push(cleanName);
-        }
-
-        scheduleRender();
-        void loadPrices(namesToLoad);
-    }
-
-    function renderShopStock() {
-        const table = document.querySelector('#market-your-app table.market-your-table');
-        if (!table) return;
+    function renderShopStockFromDom() {
+        const table = document.querySelector(
+            '#market-your-app table.market-your-table, #market-your-app table'
+        );
+        state.lastTableFound = Boolean(table);
+        if (!table) return [];
 
         const headerRow = table.querySelector('thead tr');
         if (headerRow && !headerRow.querySelector('.np-idb-price-header')) {
-            const priceHeader = Array.from(headerRow.cells).find((cell) =>
-                /your price/i.test(cell.textContent)
+            const yourPriceHeader = Array.from(headerRow.cells || []).find((cell) =>
+                /your price/i.test(cell.textContent || '')
             );
 
-            if (priceHeader) {
-                const header = document.createElement('th');
-                header.className = 'np-idb-price-header';
-                header.innerHTML = 'ItemDB Price<small>display only</small>';
-                priceHeader.insertAdjacentElement('beforebegin', header);
+            if (yourPriceHeader) {
+                const header = createPriceHeader();
+                yourPriceHeader.insertAdjacentElement('beforebegin', header);
             }
         }
 
+        const names = [];
         const priceInputs = table.querySelectorAll('tbody input[name^="cost_"]');
+
         for (const input of priceInputs) {
-            const match = input.name.match(/^cost_(.+)$/);
-            if (!match) continue;
-
-            const rowData = state.shopRowsByIndex.get(match[1]);
-            const tableRow = input.closest('tr');
+            const row = input.closest('tr');
             const currentPriceCell = input.closest('td');
-            if (!rowData || !tableRow || !currentPriceCell) continue;
+            if (!row || !currentPriceCell) continue;
 
-            let priceCell = tableRow.querySelector('.np-idb-price-cell');
+            const itemNameElement = row.querySelector('.market-your-item__name');
+            const itemImage = row.querySelector('.market-your-item__img[alt], img[alt]');
+            const name = decodeHtml(
+                itemNameElement?.textContent?.trim()
+                || itemImage?.getAttribute('alt')?.trim()
+                || ''
+            );
+            if (!name) continue;
+
+            let priceCell = row.querySelector('.np-idb-price-cell');
             if (!priceCell) {
                 priceCell = document.createElement('td');
                 priceCell.className = 'np-idb-price-cell';
                 currentPriceCell.insertAdjacentElement('beforebegin', priceCell);
             }
 
-            renderPriceCell(priceCell, rowData.name, Number(rowData.amount) || 1, true);
+            names.push(name);
+            renderPriceCell(priceCell, name, 1, true);
         }
+
+        return uniqueNames(names);
     }
 
-    // ---------------------------------------------------------------------
-    // ItemDB API + cache
-    // ---------------------------------------------------------------------
+    function createPriceHeader() {
+        const header = document.createElement('th');
+        header.className = 'np-idb-price-header';
+        header.innerHTML = 'ItemDB Price<small>display only</small>';
+        return header;
+    }
+
+    function insertHeaderAfterFirstColumn(headerRow) {
+        if (!headerRow || headerRow.querySelector('.np-idb-price-header')) return;
+        const firstHeader = headerRow.cells && headerRow.cells[0];
+        if (!firstHeader) return;
+        firstHeader.insertAdjacentElement('afterend', createPriceHeader());
+    }
+
+    function ensureCellAfter(referenceCell) {
+        const nextCell = referenceCell.nextElementSibling;
+        if (nextCell && nextCell.classList.contains('np-idb-price-cell')) return nextCell;
+
+        const existing = referenceCell.parentElement?.querySelector('.np-idb-price-cell');
+        if (existing) return existing;
+
+        const cell = document.createElement('td');
+        cell.className = 'np-idb-price-cell';
+        referenceCell.insertAdjacentElement('afterend', cell);
+        return cell;
+    }
+
+    function extractQuickStockItemName(cell) {
+        const clone = cell.cloneNode(true);
+        clone.querySelectorAll('.qs-count-badge, .qs-cash-marker').forEach((node) => node.remove());
+        return decodeHtml(clone.textContent || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function extractQuantity(cell) {
+        const badge = cell.querySelector('.qs-count-badge');
+        const match = badge?.textContent?.match(/(\d[\d,]*)/);
+        return match ? Number(match[1].replace(/,/g, '')) : 1;
+    }
 
     async function loadPrices(inputNames) {
-        const names = Array.from(new Set(
-            inputNames
-                .map((name) => decodeHtml(String(name)).trim())
-                .filter(Boolean)
-        ));
-
-        if (names.length === 0) return;
+        const names = uniqueNames(inputNames);
+        if (names.length === 0 || state.requestInProgress) return;
 
         const missingNames = [];
         for (const name of names) {
             const normalized = normalizeName(name);
             const cached = readFreshCacheEntry(normalized);
+
             if (cached) {
                 state.pricesByName.set(normalized, cached.value);
-            } else if (!state.pricesByName.has(normalized)) {
+            } else if (!state.pricesByName.has(normalized) && !state.requestedNames.has(normalized)) {
                 missingNames.push(name);
+                state.requestedNames.add(normalized);
             }
         }
 
         if (missingNames.length === 0) {
-            state.apiStatus = 'ready';
-            scheduleRender();
+            if (state.pricesByName.size > 0) state.apiStatus = 'ready';
             return;
         }
 
+        state.requestInProgress = true;
         state.apiStatus = 'loading';
+        state.lastError = '';
         scheduleRender();
 
         try {
@@ -509,6 +430,7 @@
                 for (const requestedName of chunk) {
                     const normalized = normalizeName(requestedName);
                     if (returnedByName.has(normalized)) continue;
+
                     const missingValue = { missing: true, name: requestedName };
                     state.pricesByName.set(normalized, missingValue);
                     writeCacheEntry(normalized, missingValue);
@@ -517,17 +439,25 @@
 
             state.apiStatus = 'ready';
         } catch (error) {
-            if (error && error.status === 401) {
+            const status = Number(error?.status) || 0;
+            if (status === 401 || status === 403) {
                 state.apiStatus = 'auth';
-            } else if (error && error.status === 429) {
+            } else if (status === 429) {
                 state.apiStatus = 'rate-limit';
             } else {
                 state.apiStatus = 'error';
             }
-            console.warn(SCRIPT_PREFIX, error && error.message ? error.message : error);
-        }
 
-        scheduleRender();
+            state.lastError = error?.message || String(error);
+            console.warn(SCRIPT_PREFIX, state.lastError);
+
+            for (const name of missingNames) {
+                state.requestedNames.delete(normalizeName(name));
+            }
+        } finally {
+            state.requestInProgress = false;
+            scheduleRender();
+        }
     }
 
     function requestItemDbItems(names) {
@@ -540,6 +470,7 @@
                     'Content-Type': 'application/json',
                 },
                 data: JSON.stringify({ name: names }),
+                anonymous: false,
                 timeout: 20000,
                 onload(response) {
                     if (response.status === 200) {
@@ -586,60 +517,6 @@
         };
     }
 
-    function readFreshCacheEntry(normalizedName) {
-        const cache = readCache();
-        const entry = cache[normalizedName];
-        if (!entry || !entry.fetchedAt) return null;
-
-        const ttl = entry.value && entry.value.missing
-            ? MISSING_CACHE_TTL_MS
-            : CACHE_TTL_MS;
-
-        if (Date.now() - entry.fetchedAt > ttl) return null;
-        return entry;
-    }
-
-    function readCache() {
-        try {
-            const parsed = JSON.parse(window.localStorage.getItem(CACHE_KEY) || '{}');
-            return parsed && typeof parsed === 'object' ? parsed : {};
-        } catch {
-            return {};
-        }
-    }
-
-    function writeCacheEntry(normalizedName, value) {
-        try {
-            const cache = readCache();
-            cache[normalizedName] = {
-                fetchedAt: Date.now(),
-                value,
-            };
-
-            const entries = Object.entries(cache)
-                .sort((a, b) => (b[1].fetchedAt || 0) - (a[1].fetchedAt || 0))
-                .slice(0, MAX_CACHE_ENTRIES);
-
-            window.localStorage.setItem(CACHE_KEY, JSON.stringify(Object.fromEntries(entries)));
-        } catch (error) {
-            console.warn(SCRIPT_PREFIX, 'Could not write the local price cache.', error);
-        }
-    }
-
-    // ---------------------------------------------------------------------
-    // Rendering helpers
-    // ---------------------------------------------------------------------
-
-    function ensureCellAfter(referenceCell) {
-        const existing = referenceCell.parentElement.querySelector('.np-idb-price-cell');
-        if (existing) return existing;
-
-        const cell = document.createElement('td');
-        cell.className = 'np-idb-price-cell';
-        referenceCell.insertAdjacentElement('afterend', cell);
-        return cell;
-    }
-
     function renderPriceCell(cell, itemName, quantity, isShopStock) {
         const normalized = normalizeName(itemName);
         const item = state.pricesByName.get(normalized);
@@ -654,30 +531,49 @@
 
         if (!item) {
             if (state.apiStatus === 'auth') {
-                renderStatusLink(cell, 'Visit ItemDB', 'ItemDB session expired. Visit ItemDB, then reload this Neopets page.');
+                renderStatusLink(
+                    cell,
+                    'Visit ItemDB',
+                    'ItemDB session expired. Visit ItemDB, then reload this Neopets page.'
+                );
             } else if (state.apiStatus === 'rate-limit') {
                 renderMuted(cell, 'Rate limited');
             } else if (state.apiStatus === 'error') {
                 renderMuted(cell, 'Unavailable');
             } else {
-                renderMuted(cell, 'Loading…');
+                renderMuted(cell, 'Loading...');
             }
             return;
         }
 
         if (item.missing) {
-            renderStatusLink(cell, 'Not found', `ItemDB did not return a match for ${itemName}.`, itemPageUrl(itemName));
+            renderStatusLink(
+                cell,
+                'Not found',
+                `ItemDB did not return a match for ${itemName}.`,
+                itemPageUrl(itemName)
+            );
             return;
         }
 
         if (item.isNC) {
-            renderStatusLink(cell, 'NC item', 'This is a Neocash item; no NP shop price is shown.', itemPageUrl(item.name, item.slug));
+            renderStatusLink(
+                cell,
+                'NC item',
+                'This is a Neocash item; no NP shop price is shown.',
+                itemPageUrl(item.name, item.slug)
+            );
             return;
         }
 
         const value = item.price && item.price.value;
         if (!Number.isFinite(value) || value <= 0) {
-            renderStatusLink(cell, 'No price', 'ItemDB does not currently have an NP price for this item.', itemPageUrl(item.name, item.slug));
+            renderStatusLink(
+                cell,
+                'No price',
+                'ItemDB does not currently have an NP price for this item.',
+                itemPageUrl(item.name, item.slug)
+            );
             return;
         }
 
@@ -686,7 +582,7 @@
         main.href = itemPageUrl(item.name, item.slug);
         main.target = '_blank';
         main.rel = 'noopener noreferrer';
-        main.textContent = `${item.price.inflated ? '⚠ ' : ''}${formatNp(value)} NP`;
+        main.textContent = `${item.price.inflated ? 'Warning: ' : ''}${formatNp(value)} NP`;
 
         const titleParts = ['ItemDB estimated price', 'display only'];
         if (item.price.addedAt) {
@@ -696,7 +592,7 @@
             }
         }
         if (item.price.inflated) titleParts.push('marked inflated by ItemDB');
-        main.title = titleParts.join(' — ');
+        main.title = titleParts.join(' - ');
         if (item.price.inflated) main.classList.add('np-idb-price-warning');
         cell.appendChild(main);
 
@@ -761,6 +657,22 @@
             .toLocaleLowerCase('en-US');
     }
 
+    function uniqueNames(names) {
+        const seen = new Set();
+        const result = [];
+
+        for (const name of names) {
+            const clean = decodeHtml(String(name || '')).replace(/\s+/g, ' ').trim();
+            if (!clean) continue;
+            const normalized = normalizeName(clean);
+            if (seen.has(normalized)) continue;
+            seen.add(normalized);
+            result.push(clean);
+        }
+
+        return result;
+    }
+
     function decodeHtml(value) {
         if (!/[&<>]/.test(value)) return value;
         const textarea = document.createElement('textarea');
@@ -772,17 +684,43 @@
         return Math.round(value).toLocaleString('en-US');
     }
 
-    async function waitFor(getValue, timeoutMs) {
-        const startedAt = Date.now();
-        while (Date.now() - startedAt < timeoutMs) {
-            const value = getValue();
-            if (value) return value;
-            await delay(50);
-        }
-        return null;
+    function readFreshCacheEntry(normalizedName) {
+        const cache = readCache();
+        const entry = cache[normalizedName];
+        if (!entry || !entry.fetchedAt) return null;
+
+        const ttl = entry.value && entry.value.missing
+            ? MISSING_CACHE_TTL_MS
+            : CACHE_TTL_MS;
+
+        if (Date.now() - entry.fetchedAt > ttl) return null;
+        return entry;
     }
 
-    function delay(ms) {
-        return new Promise((resolve) => window.setTimeout(resolve, ms));
+    function readCache() {
+        try {
+            const parsed = JSON.parse(window.localStorage.getItem(CACHE_KEY) || '{}');
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch {
+            return {};
+        }
+    }
+
+    function writeCacheEntry(normalizedName, value) {
+        try {
+            const cache = readCache();
+            cache[normalizedName] = {
+                fetchedAt: Date.now(),
+                value,
+            };
+
+            const entries = Object.entries(cache)
+                .sort((a, b) => (b[1].fetchedAt || 0) - (a[1].fetchedAt || 0))
+                .slice(0, MAX_CACHE_ENTRIES);
+
+            window.localStorage.setItem(CACHE_KEY, JSON.stringify(Object.fromEntries(entries)));
+        } catch (error) {
+            console.warn(SCRIPT_PREFIX, 'Could not write the local price cache.', error);
+        }
     }
 })();
