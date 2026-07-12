@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Neopets ItemDB Price Helper
 // @namespace    https://github.com/RickySimpson/np
-// @version      0.1.1
+// @version      0.1.2
 // @description  Displays ItemDB prices on Neopets Quick Stock and Shop Stock. Display only; never selects, prices, submits, buys, sells, donates, or moves items.
 // @author       RickySimpson
 // @homepageURL  https://github.com/RickySimpson/np
