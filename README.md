@@ -4,6 +4,9 @@ A display-only Tampermonkey userscript that adds ItemDB price estimates to your 
 
 It helps you review items you already own and manually decide what to do with them.
 
+<img width="1080" height="1089" alt="image" src="https://github.com/user-attachments/assets/f8ee5002-d645-4062-a60f-155b23a92f85" />
+
+
 ## Features
 
 ### Quick Stock
