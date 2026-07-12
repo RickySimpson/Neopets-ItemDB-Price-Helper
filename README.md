@@ -335,6 +335,50 @@ Confirm that:
 * You are viewing Quick Stock or Shop Stock.
 * The Neopets page was reloaded after installation.
 
+* ### The script is installed but does not run on Neopets
+
+Tampermonkey may not have permission to access Neopets.
+
+#### Google Chrome or Microsoft Edge
+
+1. Open your browser’s Extensions page.
+
+   Chrome:
+
+   ```text
+   chrome://extensions
+   ```
+
+   Microsoft Edge:
+
+   ```text
+   edge://extensions
+   ```
+
+2. Find **Tampermonkey**.
+
+3. Select **Details**.
+
+4. Find **Site access**.
+
+5. Set it to **On all sites**.
+
+You can also allow only Neopets by adding:
+
+```text
+https://www.neopets.com/*
+```
+
+After changing the permission:
+
+1. Return to Neopets.
+2. Reload the page.
+3. Select the Tampermonkey toolbar icon.
+4. Confirm **Neopets ItemDB Price Helper** appears as a script running on the current page.
+
+Browser or extension updates may occasionally reset site-access permissions, even when the script worked previously.
+
+
 ### Every item says “Visit ItemDB”
 
 Open:
