@@ -1,131 +1,271 @@
 # Neopets ItemDB Price Helper
 
-A display-only Tampermonkey userscript that adds ItemDB price information to:
+A display-only Tampermonkey userscript that adds ItemDB price estimates to your Neopets **Quick Stock** and **Shop Stock** pages.
 
-- **Neopets Quick Stock**
-- **Neopets Shop Stock**
+It helps you review items you already own and manually decide what to do with them.
 
-It is intended to help you review items you already own and manually decide what to do with them.
-
-## What it does
+## Features
 
 ### Quick Stock
 
-Adds an **ItemDB Price** column after the item name. Stacked items also show the estimated total value of the stack.
+Adds an **ItemDB Price** column beside each item name.
+
+If multiple copies of an item are stacked together, the script also displays the estimated total value of the stack.
 
 ### Shop Stock
 
-Adds an **ItemDB Price** column immediately before Neopets' existing **Your Price** field.
+Adds an **ItemDB Price** column immediately before Neopets’ existing **Your Price** field.
 
-The ItemDB price is a link that opens the matching ItemDB item page in a new tab.
+The script does not change or fill in your shop prices.
 
-## What it deliberately does not do
+### ItemDB links
 
-This script does **not**:
+Each displayed price is a link to the matching ItemDB item page. The link opens in a new browser tab so you can review additional pricing information.
 
-- Select Stock, Deposit, Donate, Discard, Gallery, Closet, Shed, or Chamber.
-- Fill in or change shop prices.
-- Submit any Neopets form.
-- Buy, sell, donate, discard, deposit, or move items.
-- Run on Neopian NPC/restock shops.
-- Highlight profitable restock items.
-- Make repeated Neopets requests or refresh pages.
-- Collect analytics, credentials, PINs, cookies, or account data.
+## Installation
 
-The script passively reads the Quick Stock response that Neopets already loads and reads the Shop Stock rows already present on the page. It sends item names only to ItemDB's bulk item endpoint.
+### 1. Install Tampermonkey
 
-## Important rules disclaimer
+Install the Tampermonkey browser extension for your browser.
 
-This project is designed as a quality-of-life, display-only script, similar in concept to ItemDB's official Safety Deposit Box Pricer. It does not automate gameplay or take actions on the user's behalf.
+### 2. Install the userscript
 
-However, Neopets' published support language broadly warns against third-party tools that provide an unfair advantage. This project is not officially approved or endorsed by Neopets, and no third-party developer can guarantee how Neopets will interpret or enforce its rules. Review the current Neopets and ItemDB rules before use.
+Open the following userscript link:
 
-Do not extend this script with automatic form filling, automatic item actions, purchasing/selling automation, NPC-shop highlighting, refresh automation, or other competitive features.
+```text
+https://raw.githubusercontent.com/RickySimpson/np/main/neopets-itemdb-price-helper.user.js
+```
 
-## Install
+Tampermonkey should open an installation screen. Review the script and select **Install**.
 
-1. Install Tampermonkey in your browser.
-2. Open the raw userscript URL after this repository has been pushed to GitHub:
+### 3. Visit ItemDB
 
-   `https://raw.githubusercontent.com/RickySimpson/np/main/neopets-itemdb-price-helper.user.js`
+Visit ItemDB at least once to create or renew your ItemDB session:
 
-3. Tampermonkey should offer to install the script.
-4. Visit ItemDB once to establish or renew its API session.
-5. Reload Neopets Quick Stock or Shop Stock.
+```text
+https://itemdb.com.br/
+```
+
+### 4. Open Neopets
+
+Visit either of these pages:
+
+* Quick Stock
+* Shop Stock
+
+Reload the page after installing the script.
+
+## How to use it
+
+Once installed, the script runs automatically when you open Quick Stock or Shop Stock.
+
+No additional setup is required.
+
+The script will:
+
+1. Read the item names already displayed by Neopets.
+2. Request matching price information from ItemDB.
+3. Display the estimated ItemDB price beside each item.
+4. Cache the results temporarily to reduce repeated requests.
+
+You still decide and perform every item action manually.
+
+## Refreshing prices
+
+ItemDB prices are cached in your browser for six hours.
+
+To request fresh prices immediately:
+
+1. Open Quick Stock or Shop Stock.
+2. Click the Tampermonkey icon in your browser toolbar.
+3. Find **Neopets ItemDB Price Helper**.
+4. Select **Refresh ItemDB price cache**.
+
+The page will request updated ItemDB information without submitting or changing anything on Neopets.
+
+Missing-item results are cached for one hour.
 
 ## ItemDB session requirement
 
-ItemDB currently requires client-side userscripts to send an ItemDB session cookie. According to ItemDB's API documentation:
+ItemDB currently requires browser userscripts to have an active ItemDB session.
 
-- Logged-out users need to visit ItemDB approximately every **24 hours**.
-- Logged-in users need to visit ItemDB approximately every **14 days**.
+According to ItemDB’s API documentation:
 
-When the session expires, the script displays **Visit ItemDB** instead of a price. Open that link, then reload the Neopets page.
+* Logged-out users may need to visit ItemDB approximately every 24 hours.
+* Logged-in users may need to visit ItemDB approximately every 14 days.
 
-## Caching and API use
+When the session expires, the script displays **Visit ItemDB** instead of a price.
 
-- Prices are cached in the browser for **6 hours**.
-- To force fresh prices, click the **Tampermonkey toolbar icon**, open this script's menu, and choose **Refresh ItemDB price cache**. The current page will immediately request fresh ItemDB data without submitting or changing anything on Neopets.
-- Missing-item results are cached for **1 hour**.
-- Item names are requested in batches of up to **100**.
-- The script uses ItemDB's recommended `POST /api/v1/items/many` endpoint.
-- No ItemDB API key is stored in the userscript.
+Open the link, visit ItemDB, and then reload the Neopets page.
 
-ItemDB prices are estimates and may be delayed, missing, inflated, or inaccurate. Always verify valuable items manually before selling, donating, or discarding them.
+## Important pricing information
 
-## Repository files
+ItemDB prices are estimates.
 
-- `neopets-itemdb-price-helper.user.js` — installable Tampermonkey userscript.
-- `README.md` — documentation and safety notes.
-- `LICENSE` — MIT license for this repository's original code.
+Prices may occasionally be:
 
-## Publish to GitHub
+* Delayed
+* Missing
+* Outdated
+* Inflated
+* Incorrect
+* Affected by sudden market changes
 
-From the folder containing these files:
+Always verify valuable items manually before selling, donating, discarding, or otherwise moving them.
 
-```bash
-git init
-git branch -M main
-git remote add origin https://github.com/RickySimpson/np.git
-git add .
-git commit -m "Add Neopets ItemDB price helper userscript"
-git push -u origin main
+## What the script does not do
+
+The script does not:
+
+* Select Stock, Deposit, Donate, Discard, Gallery, Closet, Shed, or Chamber.
+* Fill in or change shop prices.
+* Submit Neopets forms.
+* Buy or sell items.
+* Donate or discard items.
+* Deposit or move items.
+* Collect interest or rewards.
+* Run on Neopian NPC or restocking shops.
+* Highlight profitable restock items.
+* Automatically refresh Neopets pages.
+* Make repeated Neopets requests.
+* Collect analytics.
+* Access credentials, PINs, cookies, or private account information.
+
+The script only displays information. It does not take actions on your behalf.
+
+## Privacy and API use
+
+The script sends item names to ItemDB’s bulk item endpoint to retrieve matching item information.
+
+It does not send your:
+
+* Neopets username
+* Account balance
+* Shop prices
+* Inventory selections
+* PIN
+* Password
+* Browser cookies
+* Form contents
+
+Item names are requested in batches of up to 100.
+
+The script uses ItemDB’s recommended:
+
+```text
+POST /api/v1/items/many
 ```
 
-If the repository was already cloned, omit `git init`, `git branch`, and `git remote add`.
+No ItemDB API key is stored in the userscript.
 
-## Initial test checklist
+## Rules and disclaimer
 
-After installing version `0.1.1`:
+This project is designed as a display-only quality-of-life tool. It is similar in concept to ItemDB’s official Safety Deposit Box Pricer.
 
-1. Visit ItemDB and then reload Quick Stock.
-2. Confirm Eo Codestone displays the current ItemDB price.
-3. Change Quick Stock sorting, NP/NC filtering, stacking, and pagination.
-4. Select an item action manually and confirm the script does not change the selection.
-5. Open Shop Stock and confirm the ItemDB column appears before **Your Price**.
-6. Edit a shop price manually and confirm the ItemDB value stays separate.
-7. Submit a normal shop update and confirm Neopets processes it normally.
-8. Confirm clicking an ItemDB price only opens ItemDB in a new tab.
+It does not automate gameplay, submit forms, purchase items, move items, or perform actions on the user’s behalf.
+
+However, Neopets broadly warns against third-party tools that may provide an unfair advantage. This userscript is not officially approved, supported, or endorsed by Neopets.
+
+No third-party developer can guarantee how Neopets may interpret or enforce its rules.
+
+Review the current Neopets and ItemDB rules before using the script.
+
+Do not modify the script to add:
+
+* Automatic form filling
+* Automatic buying or selling
+* Automatic item actions
+* NPC-shop item highlighting
+* Automated page refreshing
+* Restocking assistance
+* Other competitive automation
+
+Use this script at your own discretion.
 
 ## Troubleshooting
 
-### Every item says "Visit ItemDB"
+### Every item says “Visit ItemDB”
 
-Visit `https://itemdb.com.br/`, then reload the Neopets page.
+Open:
 
-### Prices say "Unavailable"
+```text
+https://itemdb.com.br/
+```
 
-Check Tampermonkey's site access and confirm the script has permission to connect to `itemdb.com.br`.
+After ItemDB loads, return to Neopets and reload the page.
+
+### Prices say “Unavailable”
+
+Check that:
+
+* Tampermonkey is enabled.
+* The userscript is enabled.
+* Tampermonkey has permission to run on Neopets.
+* Tampermonkey has permission to connect to `itemdb.com.br`.
+* ItemDB is currently available.
+
+### The ItemDB price column is missing
+
+Reload the page after installing or updating the script.
+
+Also confirm you are viewing:
+
+* Neopets Quick Stock, or
+* Neopets Shop Stock
+
+The script does not run on regular inventory pages, NPC shops, the Trading Post, or the Shop Wizard.
 
 ### Quick Stock shows a horizontal scrollbar
 
-Version `0.1.1` uses a fixed desktop table layout so the added price column fits without horizontal overflow. Item names may wrap onto a second line when needed. The original mobile table behavior is preserved.
+Version 0.1.1 uses a fixed desktop table layout so the additional price column fits without horizontal overflow.
 
-### The column is missing after a Neopets update
+Long item names may wrap onto a second line.
 
-Open a GitHub issue and include:
+The original mobile table behavior is preserved.
 
-- Which page is affected.
-- Browser and Tampermonkey version.
-- A saved page source or sanitized HTML snippet.
-- Any console messages beginning with `[NP ItemDB Price Helper]`.
+### Prices are not updating
+
+Use the Tampermonkey menu command:
+
+```text
+Refresh ItemDB price cache
+```
+
+This clears the six-hour price cache and requests fresh ItemDB information.
+
+### The script stopped working after a Neopets update
+
+Neopets may occasionally change its page design or internal code.
+
+Report the issue through the project’s GitHub Issues page and include:
+
+* The affected page
+* Your browser
+* Your Tampermonkey version
+* A screenshot or sanitized HTML sample
+* Any browser console messages beginning with:
+
+```text
+[NP ItemDB Price Helper]
+```
+
+Do not include passwords, PINs, cookies, authentication tokens, or other private account information.
+
+## Uninstalling
+
+To remove the script:
+
+1. Open the Tampermonkey dashboard.
+2. Find **Neopets ItemDB Price Helper**.
+3. Select the delete or trash icon.
+4. Confirm the removal.
+
+Removing the userscript does not change any Neopets items, shop prices, or account settings.
+
+## Disclaimer
+
+This is an unofficial fan-made userscript.
+
+It is not affiliated with, endorsed by, or supported by Neopets or ItemDB.
+
+Neopets and all related names, images, and trademarks belong to their respective owners.
